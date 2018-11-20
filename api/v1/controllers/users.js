@@ -5,6 +5,8 @@ const jwt = require('jsonwebtoken');
 const config = require('../../../config/database');
 var bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
+const nodemailer = require('nodemailer');
+const passport = require('passport')
 
 router.post('/register', (req, res, next) => {
 
@@ -32,26 +34,55 @@ router.post('/register', (req, res, next) => {
                     }
                     if(user) {
                         return res.json({success:false, msg: 'User already exist'});
-                    }
-                    
-                    let newUser = new User({
-                        name: req.body.name,
-                        username: req.body.username,
-                        mobile: req.body.mobile,
-                        email: req.body.email,
-                        password: req.body.password
-                    });
-                    console.log(req.body.password);
-                    bcrypt.hash(req.body.password, 10, function(err, hash) {
-                        if (err) { throw (err); }
-                        bcrypt.compare(req.body.password, hash, function(err, result) {
+                    }else{                   
+                        let newUser = new User({
+                            name: req.body.name,
+                            username: req.body.username,
+                            mobile: req.body.mobile,
+                            email: req.body.email,
+                            password: req.body.password,
+                            token: '',
+                            activeVerify: "false"
+                        });
+                        bcrypt.hash(req.body.password, 10, function(err, hash) {
                             if (err) { throw (err); }
-                            newUser.password = hash;
-                            newUser.save().then(success => {
-                                return res.json({success: true, msg: 'user registered'});
+                            bcrypt.compare(req.body.password, hash, function(err, result) {
+                                if (err) { throw (err); }
+                                newUser.password = hash;
+                                newUser.save().then(success => {
+                                    res.json({success: true, msg: 'user registered'});
+                                    var smtpTransport = nodemailer.createTransport({
+                                        service: 'gmail',
+                                        host: 'smpt.gmail.com',
+                                        port: 587,        
+                                        secure: false, // true for 465, false for other ports
+                                        auth: {
+                                            user: 'kanja.26p@gmail.com',
+                                            pass: 'Kp26031995' 
+                                        }
+                                    });  
+                                    const token = jwt.sign({user:success._id}, config.secret);
+                                    let k = "http://localhost:1337/activation-link/"+token;
+                                    var mailOptions = {
+                                        to: req.body.email,
+                                        subject: "Click your activation link",
+                                        html: k
+                                    }
+                                    
+                                    newUser.token = token;
+                                    newUser.save();
+                                    smtpTransport.sendMail(mailOptions, function (error, response) {
+                                        if (error) {
+                                            console.log(error);
+                                            return res.json({status: false, msg: "Mail Service is not availabe Please try after sme time"});
+                                            
+                                        }
+                        
+                                    }); 
+                                });
                             });
                         });
-                    });
+                    }
                 });
             }
         }
@@ -61,75 +92,68 @@ router.post('/register', (req, res, next) => {
 router.post('/authenticate', (req, res, next) => {
     const username = req.body.username;
     const password = req.body.password;
-
-    User.getUserByUsername(username,(err, user) => {
-        if (err) throw err;
-        if (!user) {
-            return res.json({ success: false, msg: 'User not found' });
-        }
-        console.log("user pass",user.password)
-        bcrypt.compare(password, user.password, function(err, result) {
-            if (err) { throw (err); }
-            if (result) {
-                if (err) throw err;
-                const token = jwt.sign({user:user._id}, config.secret);
-                console.log(token)
-                if(err){
-                    return res.json({ success: false, msg: 'User not found' });
-                } else { 
-                    return res.json({
-                        success: true,
-                        token: 'JWT ' + token,
-                        user: {
-                            name: user.name,
-                            username: user.username,
-                            mobile: user.mobile,
-                            email: user.email,
-                        }
-                    });
+    // var token = req.headers.authorization;
+        User.getUserByUsername(username,(err, user) => {
+            if (err) throw err;
+            if (!user) {
+                return res.json({ success: false, msg: 'User not found' });
+            }
+            if(user.activeVerify == "false"){
+                return res.json({success:false, msg: "Not activated yet"})
+            }
+            bcrypt.compare(password, user.password, function(err, result) {
+                if (err) { throw (err); }
+                if (result) {
+                    if (err) throw err;
+                    if(err){
+                        return res.json({ success: false, msg: 'User not found' });
+                    } 
+                    else { 
+                        return res.json({
+                            success: true,
+                            user: {
+                                name: user.name,
+                                username: user.username,
+                                mobile: user.mobile,
+                                email: user.email,
+                            }
+                        });
+                    }
                 }
-            }
-            else {
-                return res.json({ success: false, msg: 'Wrong Password' });
-            }
+                else {
+                    return res.json({ success: false, msg: 'Wrong Password' });
+                }
 
-        });
-        
-    });
+            });
+            
+        });  
 });
 
 router.get('/logout', (req, res, next) => {
-    if(!req.headers.authorization){
-        return res.json({success: false, msg:'Please login first'});
-    } else {
-        req.logout();
-        return res.json({success: true, msg:'Logout successfully'});
-    }
+    User.findOne({token: req.headers.authorization},(err, user) => {
+        if(!user){
+            return res.json({success:false, msg: "Please login first"})
+        }else{
+            req.logout();
+            return res.json({success:true, msg: "Logout successfully"})
+        }
+    });
 });
 
 router.get('/dashboard', (req, res, next) => {
-    var token = req.headers.authorization;
-    jwt.verify(token, config.secret, function(err, decoded) {
-        console.log(decoded);
-        User.findById(mongoose.Types.ObjectId(decoded.user),(err,user)=>{
-            console.log(user._id != decoded.user);
-            if(user._id != decoded.user){
-                if (err) return res.status(500).send({ auth: false, message: 'Failed to authenticate token.' });
-            } else {
-                return res.json({success: true, msg:'Welcome to Dashboard'});
-
-            }
-        }) 
-      
-      });
+    User.findOne({token: req.headers.authorization},(err, user) => {
+        if(user){
+            return res.json({success:true, msg: "Welcome to Dashboard"})
+        }else{
+            return res.json({success:false, msg: "Failed in authorization"})
+        }
+    });
 });
 
 router.get('/summary', (req,res, next) => {
     const exclude = "-password -__v -_id";
     User.find({},exclude, function(e, coll) {
         User.find({},exclude).count(function (e, count) {
-          console.log(count);
-          console.log(coll);
           res.json({success:true, msg: count,coll});
         });
       });  
@@ -139,7 +163,7 @@ router.post('/forget', (req,res,next) =>{
     const email = req.body.email;
     User.findOne({email:email}, (err, data) =>{
         if(data){
-            let randomNumber = Math.floor(Math.random()*100000);
+            let token = data.token;
             var smtpTransport = nodemailer.createTransport({
                 service: 'gmail',
                 host: 'smpt.gmail.com',
@@ -150,7 +174,7 @@ router.post('/forget', (req,res,next) =>{
                     pass: 'Kp26031995' 
                 }
             });  
-            let k = "http://localhost:1337/email-verification/"+randomNumber;
+            let k = "http://localhost:1337/email-verification/"+token;
             var mailOptions = {
                 to: req.body.email,
                 subject: "Context Reset password email notification for verify your account",
@@ -162,56 +186,69 @@ router.post('/forget', (req,res,next) =>{
                     console.log(error);
                     return res.json({status: false, msg: "Mail Service is not availabe Please try after sme time"});
                     
-                } 
+                } else {
+                    return res.json({status: true, msg: "Check your mail"});
+                }
 
             }); 
-            
-            data.random = randomNumber;
-            data.save().then(success=> {
-                return res.json({status: success, msg: "Successfully sent"});
-            });
-        } 
+        } else {
+            return res.json({status: false, msg: "No data"});
+        }
     });
    
 });
 
-router.post('/changePassword', (req,res,next) =>{
-    const random = req.body.random;
-    var newPassword = req.body.newPassword;
-    var confirmPassword = req.body.confirmPassword;
-    User.findOne({random:random}, (err, response) =>{
+router.post('/changePassword/:token', (req,res,next) =>{
+    User.findOne({token:req.params.token}, (err, response) =>{
         if(response){
             res.json({status: true, msg: "Valid code"});
-            bcrypt.hash(confirmPassword, 10, function(err, hash) {
+            bcrypt.hash(req.body.confirmPassword, 10, function(err, hash) {
                 if (err) { throw (err); }
-                bcrypt.compare(confirmPassword, hash, function(err, result) {
+                bcrypt.compare(req.body.confirmPassword, hash, function(err, result) {
                     if (err) { throw (err); }
-                    confirmPassword = hash;
-                    response.password = confirmPassword;
+                    req.body.confirmPassword = hash;
+                    response.password = req.body.confirmPassword;
                     response.save().then(success=> {
                         return res.json({status: success, msg: "Your new password has been successfully saved"});
                     });
                 });
             });
         } else {
-            return res.json({status: false, msg: "Not Valid"});
+            res.json({status: false, msg: "Not Valid"});
         }
     });
 });
 
 router.put('/update/:_id', (req,res,next) => {
-    const name = req.body.name;
-    const username = req.body.username;
-    const mobile = req.body.mobile;
-    const email = req.body.email;
-    let query = {$set:{name:name,username:username,mobile:mobile,email:email}}
-    User.findByIdAndUpdate(req.params._id, query, (err, response) =>{
-        if(err){
-            return res.json({status: false, msg: "Failed to update"});
-        }else{
-            return res.json({status: true, msg: "Successfully updated"});
+    let query = {$set:{name:req.body.name,username:req.body.username,mobile:req.body.mobile,email:req.body.email}}
+    User.findOne({_id: req.params._id}, (err,user) => {
+        if(user){
+            User.findByIdAndUpdate(req.params._id, query, (err, response) =>{
+                if(err) {return res.json({status: false, msg: "Failed to update"});}
+                else {return res.json({status: true, msg: "Successfully updated"});}  
+            });
+        }else {
+            return res.json({msg: "Incorrect User ID"});
         }
-        
+
     });
+   
+});
+
+router.get('/email-verification/:token', async(req,res,next) => {
+    try {
+        User.findOne({token: req.params.token}, (err,user) => {
+            if (user){
+                user.activeVerify = "true";
+                user.save().then(success=> {
+                    return res.json({msg: "Activated"});
+                });
+            }else {
+                res.json({msg: "Token is not valid"});
+            }
+        })
+      } catch (e) {
+          res.json(e)
+      }
 });
 module.exports = router; 

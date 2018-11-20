@@ -5,15 +5,15 @@ const UserSchema = mongoose.Schema({
     id:{
         type: String
     },
+    token:{
+        type: String
+    },
     name:{
         type: String
     },
     username:{
         type: String,
         required: true
-    },
-    random:{
-        type: String
     },
     mobile:{
         type: String,
@@ -26,6 +26,9 @@ const UserSchema = mongoose.Schema({
     password:{
         type: String,
         required: true
+    },
+    activeVerify:{
+        type: String
     }
 })
 
