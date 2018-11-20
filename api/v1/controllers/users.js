@@ -9,8 +9,6 @@ const nodemailer = require('nodemailer');
 const passport = require('passport')
 
 router.post('/register', (req, res, next) => {
-
-    console.log(req.body);
     req.checkBody('name').notEmpty().withMessage('Name is required').matches(/^[A-Za-z]+$/,"i").withMessage('Name must be only alphabets');
     req.checkBody('email').notEmpty().withMessage('Email is required').matches(/^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/,"g").withMessage('must be only valid email');
     req.checkBody('mobile').notEmpty().withMessage('Mobile is required').isInt('Mobile is not valid').isLength({ max: 10 }).withMessage('must be at least 10 chars long');;
@@ -19,22 +17,15 @@ router.post('/register', (req, res, next) => {
 
     req.getValidationResult().then(result => {
         let err = result.array({onlyFirstError: true})
-        if (!result.isEmpty() ){
-            let error = err[0].msg;
-            res.json ({success: false, msg: error})
-        } else {
-            if(req.body.password != req.body.confirmpassword){
-                res.json({success:false, msg: 'Password does not match'});
-            }
+        if (!result.isEmpty() ){ let error = err[0].msg; res.json ({success: false, msg: error})} 
+        else {
+            if(req.body.password != req.body.confirmpassword){res.json({success:false, msg: 'Password does not match'});}
             else{
                 let quary = {$or:[{username:req.body.username},{mobile:req.body.mobile},{email:req.body.email}]}
                 User.findOne(quary, (err, user) => {
-                    if (err) {
-                        return res.json({success:false, msg: error});
-                    }
-                    if(user) {
-                        return res.json({success:false, msg: 'User already exist'});
-                    }else{                   
+                    if (err) {return res.json({success:false, msg: error});}
+                    if(user) {return res.json({success:false, msg: 'User already exist'});}
+                    else{                   
                         let newUser = new User({
                             name: req.body.name,
                             username: req.body.username,
@@ -72,12 +63,8 @@ router.post('/register', (req, res, next) => {
                                     newUser.token = token;
                                     newUser.save();
                                     smtpTransport.sendMail(mailOptions, function (error, response) {
-                                        if (error) {
-                                            console.log(error);
-                                            return res.json({status: false, msg: "Mail Service is not availabe Please try after sme time"});
-                                            
-                                        }
-                        
+                                        if (error) {return res.json({status: false, msg: "Mail Service is not availabe Please try after sme time"});}
+            
                                     }); 
                                 });
                             });
@@ -90,43 +77,25 @@ router.post('/register', (req, res, next) => {
 });
 
 router.post('/authenticate', (req, res, next) => {
-    const username = req.body.username;
-    const password = req.body.password;
-    // var token = req.headers.authorization;
-        User.getUserByUsername(username,(err, user) => {
-            if (err) throw err;
-            if (!user) {
-                return res.json({ success: false, msg: 'User not found' });
+    User.getUserByUsername(req.body.username,(err, user) => {
+        if (err) throw err;
+        if (!user) {
+            return res.json({ success: false, msg: 'User not found' });
+        }
+        if(user.activeVerify == "false"){
+            return res.json({success:false, msg: "Not activated yet"})
+        }
+        bcrypt.compare(req.body.password, user.password, function(err, result) {
+            if (err) { throw (err); }
+            if (result) {
+                if (err) throw err;
+                if(err){ return res.json({ success: false, msg: 'User not found' });} 
+                else { return res.json({success: true,user: {name: user.name,username: user.username,mobile: user.mobile,email: user.email}});}
             }
-            if(user.activeVerify == "false"){
-                return res.json({success:false, msg: "Not activated yet"})
-            }
-            bcrypt.compare(password, user.password, function(err, result) {
-                if (err) { throw (err); }
-                if (result) {
-                    if (err) throw err;
-                    if(err){
-                        return res.json({ success: false, msg: 'User not found' });
-                    } 
-                    else { 
-                        return res.json({
-                            success: true,
-                            user: {
-                                name: user.name,
-                                username: user.username,
-                                mobile: user.mobile,
-                                email: user.email,
-                            }
-                        });
-                    }
-                }
-                else {
-                    return res.json({ success: false, msg: 'Wrong Password' });
-                }
-
-            });
-            
-        });  
+            else { return res.json({ success: false, msg: 'Wrong Password' });}
+        });
+        
+    });  
 });
 
 router.get('/logout', (req, res, next) => {
@@ -160,8 +129,7 @@ router.get('/summary', (req,res, next) => {
 });
 
 router.post('/forget', (req,res,next) =>{
-    const email = req.body.email;
-    User.findOne({email:email}, (err, data) =>{
+    User.findOne({email:req.body.email}, (err, data) =>{
         if(data){
             let token = data.token;
             var smtpTransport = nodemailer.createTransport({
@@ -182,18 +150,10 @@ router.post('/forget', (req,res,next) =>{
             }
 
             smtpTransport.sendMail(mailOptions, function (error, response) {
-                if (error) {
-                    console.log(error);
-                    return res.json({status: false, msg: "Mail Service is not availabe Please try after sme time"});
-                    
-                } else {
-                    return res.json({status: true, msg: "Check your mail"});
-                }
-
+                if (error) { return res.json({status: false, msg: "Mail Service is not availabe Please try after sme time"});} 
+                else { return res.json({status: true, msg: "Check your mail"});}
             }); 
-        } else {
-            return res.json({status: false, msg: "No data"});
-        }
+        } else {return res.json({status: false, msg: "No data"});}
     });
    
 });
